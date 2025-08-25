@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动态实时行情</title>
+    
+    <style>
+        /* CSS变量定义，方便全局修改主题颜色和样式 */
+        :root {
+            --card-bg: #ffffff;
+            --body-bg: #f4f6f8;
+            --text-color: #333;
+            --primary-color: #009879;
+            --positive-color: #c0392b;
+            --negative-color: #27ae60;
+            --border-color: #e0e0e0;
+        }
+
+        /* 页面整体样式 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--body-bg);
+            color: var(--text-color);
+        }
+
+        /* 主布局容器，使用Grid布局 */
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr; /* 始终为单列布局 */
+            gap: 20px; /* 卡片之间的间距 */
+            max-width: 1800px;
+            margin: auto;
+        }
+
+        /* 子卡片容器，用于在第二行并排显示两个小卡片 */
+        .sub-card-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        
+        /* 当屏幕宽度大于992px时，子卡片容器变为两列均分布局 */
+        @media (min-width: 992px) {
+            .sub-card-container {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        /* 卡片的通用样式 */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        /* 卡片标题样式 */
+        .card h2, .card h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        
+        /* 顶部控制栏样式 */
+        .controls {
+            display: flex;
+            flex-wrap: wrap; /* 允许换行 */
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 6px;
+        }
+        .controls > div {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 子卡片控制栏样式 */
+        .sub-card-controls {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sub-card-controls label {
+            font-weight: 500;
+        }
+
+        /* 状态信息栏样式 */
+        .status-bar {
+            padding: 5px 15px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 500;
+            border-radius: 4px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .status-on { background-color: #e8f5e9; color: #2e7d32; }
+        .status-off { background-color: #fff3e0; color: #ef6c00; }
+        .status-error { background-color: #ffebee; color: #c62828; }
+
+        /* 列选择器UI美化 */
+        .dropdown-check-list {
+            position: relative;
+        }
+        .dropdown-check-list .anchor {
+            position: relative;
+            cursor: pointer;
+            padding: 8px 50px 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        .dropdown-check-list .anchor:after {
+            content: "";
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid #000;
+            position: absolute;
+            right: 15px;
+            top: calc(50% - 2.5px);
+        }
+        .dropdown-check-list ul.items {
+            display: none;
+            position: absolute;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 2px 0 0 0;
+            list-style: none;
+            max-height: 250px;
+            overflow-y: auto;
+            z-index: 1000;
+            min-width: 300px;
+            column-count: 2;
+            column-gap: 10px;
+        }
+        .dropdown-check-list.visible ul.items {
+            display: block;
+        }
+        .dropdown-check-list ul.items li {
+            padding: 5px;
+            display: block;
+            break-inside: avoid;
+        }
+        .dropdown-check-list ul.items li label {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* 手动刷新按钮样式 */
+        #manual-refresh-btn {
+            padding: 8px 15px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 4px;
+            border: 1px solid var(--primary-color);
+            background-color: var(--primary-color);
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.2s;
+        }
+        #manual-refresh-btn:hover {
+            background-color: #007a63;
+        }
+        #manual-refresh-btn:disabled {
+            background-color: #95a5a6;
+            border-color: #95a5a6;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        /* --- 其他通用样式 --- */
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        thead tr { background-color: var(--primary-color); color: #ffffff; text-align: left; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); text-align: right; white-space: nowrap; }
+        th:nth-child(1), th:nth-child(2), td:nth-child(1), td:nth-child(2) { text-align: left; }
+        tbody tr:nth-of-type(even) { background-color: #f9f9f9; }
+        .positive { color: var(--positive-color); font-weight: 500; }
+        .negative { color: var(--negative-color); font-weight: 500; }
+        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #27ae60; }
+        input:focus + .slider { box-shadow: 0 0 1px #27ae60; }
+        input:checked + .slider:before { transform: translateX(26px); }
+
+    </style>
+</head>
+
+<body>
+    <div class="dashboard">
+        <div class="card main-card">
+            <h2>实时数据总览</h2>
+            
+            <div class="controls">
+                <div>
+                    <label for="search-box">搜索:</label>
+                    <input type="search" id="search-box" placeholder="输入代码或名称...">
+                </div>
+                <div>
+                    <label>显示列:</label>
+                    <div id="column-selector" class="dropdown-check-list">
+                        <span class="anchor">选择列</span>
+                        <ul class="items"></ul>
+                    </div>
+                </div>
+                <div>
+                    <label for="refresh-rate">刷新频率:</label>
+                    <select id="refresh-rate">
+                        <option value="60000">1 分钟</option>
+                        <option value="180000" selected>3 分钟</option>
+                        <option value="300000">5 分钟</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="page-size">每页显示:</label>
+                    <select id="page-size">
+                        <option value="10" selected>10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                    </select>
+                </div>
+                <div>
+                    <label>自动刷新:</label>
+                    <label class="switch">
+                        <input type="checkbox" id="auto-refresh-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div>
+                    <button id="manual-refresh-btn">&#x21bb; 手动刷新</button>
+                </div>
+            </div>
+
+            <div id="status-bar" class="status-bar"></div>
+
+            <div class="table-container">
+                <table>
+                    <thead id="table-head"></thead>
+                    <tbody id="table-body">
+                        <tr><td colspan="7" style="text-align:center; padding: 40px;">正在初始化...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div>
+            <div class="sub-card-controls">
+                <label for="sub-card-page-size">榜单显示项数:</label>
+                <select id="sub-card-page-size">
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                </select>
+            </div>
+            <div class="sub-card-container">
+                <div class="card">
+                    <h3 id="speed-card-title">🚀 涨速榜</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>代码</th>
+                                    <th>名称</th>
+                                    <th>涨速(%)</th>
+                                    <th>最新价</th>
+                                    <th>涨跌幅(%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="speed-card-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 id="5min-card-title">⏱️ 5分钟涨跌榜</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>代码</th>
+                                    <th>名称</th>
+                                    <th>5分钟涨跌(%)</th>
+                                    <th>最新价</th>
+                                    <th>涨跌幅(%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="5min-change-card-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 当整个HTML文档加载并解析完成后，执行此函数
+        document.addEventListener('DOMContentLoaded', function() {
+            // --- 全局变量和状态管理 ---
+            
+            // 用于存储从API获取的全部股票数据
+            let allStockData = [];
+            // 用于存储自动刷新的定时器ID，方便后续清除
+            let refreshTimerId = null;
+
+            // 应用的静态配置
+            const config = {
+                api: '/api/data', // 后端数据接口地址
+                // 定义所有列的key和对应的中文名称
+                columns: {
+                    symbol: "代码", name: "名称", latest_price: "最新价",
+                    change_percent: "涨跌幅(%)", change_amount: "涨跌额", volume: "成交量(手)",
+                    turnover: "成交额(元)", amplitude: "振幅(%)", high: "最高",
+                    low: "最低", open: "今开", previous_close: "昨收",
+                    volume_ratio: "量比", turnover_rate: "换手率(%)", pe_ratio: "市盈率",
+                    pb_ratio: "市净率", market_cap_total: "总市值", market_cap_float: "流通市值",
+                    speed_increase: "涨速(%)", change_5min: "5分钟涨跌(%)", change_60day: "60日涨跌幅(%)",
+                    change_ytd: "年初至今涨跌幅(%)"
+                },
+                // 主表格默认显示的列
+                defaultVisibleColumns: ["symbol", "name", "latest_price", "change_percent", "change_amount", "volume", "turnover"]
+            };
+
+            // 应用的动态状态，存储用户的设置和UI状态
+            const state = {
+                searchTerm: '', // 搜索框内容
+                refreshRate: 180000, // 刷新频率(毫秒)
+                pageSize: 10, // 主卡片默认显示10项
+                subCardPageSize: 10, // 子卡片默认显示10项
+                visibleColumns: new Set(config.defaultVisibleColumns), // 当前可见的列
+                isAutoRefreshOn: false // 自动刷新是否开启
+            };
+
+            // --- 获取页面上的HTML元素，方便后续操作 ---
+            const searchBox = document.getElementById('search-box');
+            const refreshRateSelector = document.getElementById('refresh-rate');
+            const pageSizeSelector = document.getElementById('page-size');
+            const tableHead = document.getElementById('table-head');
+            const tableBody = document.getElementById('table-body');
+            const columnSelector = document.getElementById('column-selector');
+            const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
+            const statusBar = document.getElementById('status-bar');
+            const speedCardBody = document.getElementById('speed-card-body');
+            const fiveMinChangeCardBody = document.getElementById('5min-change-card-body');
+            const manualRefreshBtn = document.getElementById('manual-refresh-btn');
+            const subCardPageSizeSelector = document.getElementById('sub-card-page-size');
+            const speedCardTitle = document.getElementById('speed-card-title');
+            const fiveMinCardTitle = document.getElementById('5min-card-title');
+
+            // --- 核心功能函数 ---
+
+            // 函数：判断当前是否为A股开市时间 (东八区)
+            function isTradingHours() {
+                const now = new Date();
+                const cstString = now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' });
+                const cstDate = new Date(cstString);
+                const dayOfWeek = cstDate.getDay(); // 0=周日, 6=周六
+                if (dayOfWeek === 0 || dayOfWeek === 6) { return false; } // 周末休市
+                const hours = cstDate.getHours();
+                const minutes = cstDate.getMinutes();
+                const currentTimeInMinutes = hours * 60 + minutes;
+                const marketOpenInMinutes = 9 * 60 + 15; // 9:15
+                const marketCloseInMinutes = 15 * 60; // 15:00
+                return currentTimeInMinutes >= marketOpenInMinutes && currentTimeInMinutes <= marketCloseInMinutes;
+            }
+
+            // 函数：更新顶部的状态信息栏
+            function updateStatusMessage(message, type) {
+                statusBar.textContent = message;
+                statusBar.className = 'status-bar'; // 先重置样式
+                if (type === 'on') { statusBar.classList.add('status-on'); }
+                else if (type === 'off') { statusBar.classList.add('status-off'); }
+                else if (type === 'error') { statusBar.classList.add('status-error'); }
+            }
+
+            // 函数：调度下一次自动刷新
+            function scheduleNextFetch() {
+                clearTimeout(refreshTimerId); // 总是先清除旧的定时器
+                if (!state.isAutoRefreshOn) return; // 如果开关关闭，则直接退出
+                // 随机增加5-10秒的抖动，避免规律性请求
+                const jitter = Math.random() * 5000 + 5000;
+                const nextFetchDelay = state.refreshRate + jitter;
+                const minutes = Math.floor(nextFetchDelay / 60000);
+                const seconds = Math.round((nextFetchDelay % 60000) / 1000);
+                updateStatusMessage(`自动刷新已开启。下一次刷新将在约 ${minutes}分 ${seconds}秒 后`, 'on');
+                
+                // 设置定时器，在延迟后执行数据获取
+                refreshTimerId = setTimeout(async () => {
+                    await fetchData();
+                    // 在数据获取完成后，如果开关仍然是开启状态，则再次调用本函数，形成循环
+                    if(state.isAutoRefreshOn) { scheduleNextFetch(); }
+                }, nextFetchDelay);
+            }
+
+            // 函数：初始化列选择器下拉菜单
+            function initializeColumnSelector() {
+                const itemsList = columnSelector.querySelector('.items');
+                for (const key in config.columns) {
+                    const li = document.createElement('li');
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `col-${key}`;
+                    checkbox.value = key;
+                    checkbox.checked = state.visibleColumns.has(key); // 根据state设置初始选中状态
+                    checkbox.addEventListener('change', (e) => { // 监听勾选变化
+                        if (e.target.checked) { state.visibleColumns.add(key); }
+                        else { state.visibleColumns.delete(key); }
+                        renderMainTable(); // 重新渲染主表格
+                    });
+                    const label = document.createElement('label');
+                    label.htmlFor = `col-${key}`;
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(` ${config.columns[key]}`));
+                    li.appendChild(label);
+                    itemsList.appendChild(li);
+                }
+                // 控制下拉菜单的显示和隐藏
+                const anchor = columnSelector.querySelector('.anchor');
+                anchor.addEventListener('click', () => { columnSelector.classList.toggle('visible'); });
+                document.addEventListener('click', (e) => { if (!columnSelector.contains(e.target)) { columnSelector.classList.remove('visible'); }});
+            }
+
+            // 函数：格式化单元格数据，使其显示更友好
+            function formatCell(key, value) {
+                if (value === null || value === undefined) return 'N/A';
+                if (typeof value === 'number') {
+                    if (key.includes('percent') || key.includes('rate') || key.includes('amplitude') || key.includes('speed') || key.includes('ratio') || key.includes('change_5min')) {
+                        return value.toFixed(2) + '%';
+                    }
+                    if (key === 'volume') { return (value / 100).toFixed(0); } // 成交量转为 "手"
+                    if (key === 'turnover' || key.includes('market_cap')) { // 成交额和市值转为 "万" 或 "亿"
+                        if (value > 1e8) return (value / 1e8).toFixed(2) + '亿';
+                        if (value > 1e4) return (value / 1e4).toFixed(2) + '万';
+                    }
+                    return value.toFixed(2);
+                }
+                return value;
+            }
+
+            // 函数：渲染两个子卡片（涨速榜和5分钟涨跌榜）
+            function renderSubCards() {
+                if (allStockData.length === 0) return;
+                const itemCount = state.subCardPageSize;
+
+                // 渲染涨速榜
+                const sortedBySpeed = allStockData.slice().sort((a, b) => (b.speed_increase || -Infinity) - (a.speed_increase || -Infinity));
+                const topItemsSpeed = sortedBySpeed.slice(0, itemCount);
+                let speedCardHTML = '';
+                topItemsSpeed.forEach(stock => {
+                    speedCardHTML += `<tr><td>${stock.symbol}</td><td>${stock.name}</td><td class="${stock.speed_increase > 0 ? 'positive' : stock.speed_increase < 0 ? 'negative' : ''}">${formatCell('speed_increase', stock.speed_increase)}</td><td class="${stock.change_amount > 0 ? 'positive' : stock.change_amount < 0 ? 'negative' : ''}">${formatCell('latest_price', stock.latest_price)}</td><td class="${stock.change_percent > 0 ? 'positive' : stock.change_percent < 0 ? 'negative' : ''}">${formatCell('change_percent', stock.change_percent)}</td></tr>`;
+                });
+                speedCardBody.innerHTML = speedCardHTML || `<tr><td colspan="5" style="text-align:center;">暂无数据</td></tr>`;
+
+                // 渲染5分钟涨跌榜
+                const sortedBy5Min = allStockData.slice().sort((a, b) => (b.change_5min || -Infinity) - (a.change_5min || -Infinity));
+                const topItems5Min = sortedBy5Min.slice(0, itemCount);
+                let fiveMinCardHTML = '';
+                topItems5Min.forEach(stock => {
+                    fiveMinCardHTML += `<tr><td>${stock.symbol}</td><td>${stock.name}</td><td class="${stock.change_5min > 0 ? 'positive' : stock.change_5min < 0 ? 'negative' : ''}">${formatCell('change_5min', stock.change_5min)}</td><td class="${stock.change_amount > 0 ? 'positive' : stock.change_amount < 0 ? 'negative' : ''}">${formatCell('latest_price', stock.latest_price)}</td><td class="${stock.change_percent > 0 ? 'positive' : stock.change_percent < 0 ? 'negative' : ''}">${formatCell('change_percent', stock.change_percent)}</td></tr>`;
+                });
+                fiveMinChangeCardBody.innerHTML = fiveMinCardHTML || `<tr><td colspan="5" style="text-align:center;">暂无数据</td></tr>`;
+
+                // 更新榜单标题
+                speedCardTitle.textContent = `🚀 涨速榜 Top ${itemCount}`;
+                fiveMinCardTitle.textContent = `⏱️ 5分钟涨跌榜 Top ${itemCount}`;
+            }
+
+            // 函数：渲染主数据表格
+            function renderMainTable() {
+                // 渲染表头
+                let headerHTML = '<tr>';
+                for (const colKey of state.visibleColumns) { headerHTML += `<th>${config.columns[colKey] || colKey}</th>`; }
+                headerHTML += '</tr>';
+                tableHead.innerHTML = headerHTML;
+
+                // 根据搜索词过滤数据
+                const lowerSearchTerm = state.searchTerm.toLowerCase();
+                const filteredData = allStockData.filter(stock => stock.symbol.toLowerCase().includes(lowerSearchTerm) || stock.name.toLowerCase().includes(lowerSearchTerm));
+                
+                // 根据分页设置截取数据
+                const paginatedData = filteredData.slice(0, state.pageSize);
+
+                // 如果没有数据，显示提示信息
+                if (paginatedData.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="${state.visibleColumns.size}" style="text-align:center; padding: 40px;">没有匹配的数据</td></tr>`;
+                    return;
+                }
+                
+                // 渲染表体
+                let bodyHTML = '';
+                paginatedData.forEach(stock => {
+                    bodyHTML += '<tr>';
+                    for (const colKey of state.visibleColumns) {
+                        const value = stock[colKey];
+                        let className = '';
+                        if (colKey === 'latest_price' || colKey === 'change_percent' || colKey === 'change_amount') {
+                            if (stock.change_amount > 0) className = 'positive';
+                            else if (stock.change_amount < 0) className = 'negative';
+                        }
+                        bodyHTML += `<td class="${className}">${formatCell(colKey, value)}</td>`;
+                    }
+                    bodyHTML += '</tr>';
+                });
+                tableBody.innerHTML = bodyHTML;
+            }
+
+            // 函数：从后端API获取数据
+            async function fetchData() {
+                try {
+                    const response = await fetch(config.api);
+                    if (!response.ok) { throw new Error(`网络错误! 状态码: ${response.status}`); }
+                    allStockData = await response.json();
+                    // 获取成功后，渲染所有相关的UI部分
+                    renderMainTable();
+                    renderSubCards();
+                } catch (error) {
+                    console.error("获取数据失败:", error);
+                    // 如果获取失败，停止自动刷新并显示错误信息
+                    state.isAutoRefreshOn = false;
+                    autoRefreshToggle.checked = false;
+                    clearTimeout(refreshTimerId);
+                    updateStatusMessage(`数据加载失败: ${error.message} 自动刷新已暂停。`, 'error');
+                }
+            }
+
+            // --- 事件监听器绑定 ---
+            // 监听搜索框的输入事件
+            searchBox.addEventListener('input', (e) => {
+                state.searchTerm = e.target.value;
+                renderMainTable(); // 只更新主表格
+            });
+
+            // 监听主表格分页大小选择器的变化
+            pageSizeSelector.addEventListener('change', (e) => {
+                state.pageSize = parseInt(e.target.value, 10);
+                renderMainTable(); // 只更新主表格
+            });
+            
+            // 监听子卡片分页大小选择器的变化
+            subCardPageSizeSelector.addEventListener('change', (e) => {
+                state.subCardPageSize = parseInt(e.target.value, 10);
+                renderSubCards(); // 只重新渲染子卡片
+            });
+
+            // 监听刷新频率选择器的变化
+            refreshRateSelector.addEventListener('change', (e) => {
+                state.refreshRate = parseInt(e.target.value, 10);
+                scheduleNextFetch(); // 重新安排下一次刷新
+            });
+
+            // 监听自动刷新开关的变化
+            autoRefreshToggle.addEventListener('change', (e) => {
+                state.isAutoRefreshOn = e.target.checked;
+                if (state.isAutoRefreshOn) {
+                    updateStatusMessage('正在启动自动刷新...', 'on');
+                    fetchData(); // 立即获取一次数据
+                    scheduleNextFetch(); // 开始自动刷新循环
+                } else {
+                    clearTimeout(refreshTimerId); // 清除定时器以停止
+                    updateStatusMessage('自动刷新已由用户关闭。', 'off');
+                }
+            });
+
+            // 监听手动刷新按钮的点击事件
+            manualRefreshBtn.addEventListener('click', async () => {
+                manualRefreshBtn.disabled = true; // 禁用按钮，防止重复点击
+                manualRefreshBtn.textContent = '正在刷新...';
+                updateStatusMessage('正在手动刷新数据...', 'on');
+                
+                await fetchData(); // 等待数据获取完成
+                
+                manualRefreshBtn.disabled = false; // 恢复按钮
+                manualRefreshBtn.innerHTML = '&#x21bb; 手动刷新';
+                // 如果自动刷新是关闭的，刷新后提示一下
+                if (!state.isAutoRefreshOn) {
+                    updateStatusMessage('手动刷新完成。自动刷新当前为关闭状态。', 'off');
+                }
+            });
+
+            // --- 应用初始化函数 ---
+            function init() {
+                initializeColumnSelector(); // 初始化列选择器
+                // 根据是否为开市时间，决定自动刷新的初始状态
+                if (isTradingHours()) {
+                    state.isAutoRefreshOn = true;
+                    autoRefreshToggle.checked = true;
+                    fetchData(); // 立即获取数据
+                    scheduleNextFetch(); // 开始自动刷新
+                } else {
+                    state.isAutoRefreshOn = false;
+                    autoRefreshToggle.checked = false;
+                    updateStatusMessage('当前为非开市时间，自动刷新已关闭。', 'off');
+                    fetchData(); // 非开市也加载一次数据
+                }
+            }
+
+            // 执行初始化
+            init();
+        });
+    </script>
+</body>
+</html>
